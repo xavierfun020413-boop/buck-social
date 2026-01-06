@@ -15,7 +15,13 @@
         // #  STEP 1: PASTE YOUR FIREBASE CONFIG INSIDE THE QUOTES  #
         // ##########################################################
         
-        const myConfig = ' apiKey: "AIzaSyA2QMxUsf3xQ7POorNYi_GwA2Hc6V9KxZw",
+        const myConfig =  apiKey: "AIzaSyA2QMxUsf3xQ7POorNYi_GwA2Hc6V9KxZw",
+  authDomain: "buck-76fca.firebaseapp.com",
+  projectId: "buck-76fca",
+  storageBucket: "buck-76fca.firebasestorage.app",
+  messagingSenderId: "1086215871010",
+  appId: "1:1086215871010:web:31f435e5dc8fa52074887b",
+  measurementId: "G-0J12VYBKJ4"' apiKey: "AIzaSyA2QMxUsf3xQ7POorNYi_GwA2Hc6V9KxZw",
   authDomain: "buck-76fca.firebaseapp.com",
   projectId: "buck-76fca",
   storageBucket: "buck-76fca.firebasestorage.app",
