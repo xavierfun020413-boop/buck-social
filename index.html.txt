@@ -1,0 +1,514 @@
+!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Drift Pro Multiplayer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #111; }
+#ui {
+position: absolute;
+top: 20px;
+left: 20px;
+color: white;
+pointer-events: none;
+text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+z-index: 10;
+}
+.stat-box { margin-bottom: 10px; }
+.label { font-size: 14px; text-transform: uppercase; opacity: 0.8; }
+.value { font-size: 32px; font-weight: bold; font-variant-numeric: tabular-nums; }
+.coins { color: #ffda00; }
+
+#menu-buttons {
+position: absolute;
+top: 20px;
+right: 20px;
+display: flex;
+flex-direction: column;
+gap: 10px;
+z-index: 20;
+}
+.btn {
+background: rgba(0, 0, 0, 0.6);
+color: white;
+border: 2px solid rgba(255, 255, 255, 0.2);
+padding: 10px 20px;
+cursor: pointer;
+border-radius: 8px;
+font-weight: bold;
+transition: all 0.2s;
+text-align: center;
+pointer-events: auto;
+}
+.btn:hover { background: rgba(255, 255, 255, 0.2); border-color: white; }
+.btn-fullscreen { background: #ffda00; color: #000; border-color: #ffda00; }
+.btn-fullscreen:hover { background: #fff; color: #000; }
+
+#room-info {
+position: absolute;
+bottom: 20px;
+left: 20px;
+color: rgba(255,255,255,0.5);
+font-size: 12px;
+z-index: 10;
+}
+
+#showroom-ui {
+position: absolute;
+inset: 0;
+background: radial-gradient(circle at center, rgba(0,0,0,0) 0%, rgba(0,0,0,0.8) 100%);
+display: none;
+flex-direction: column;
+align-items: center;
+justify-content: flex-end;
+padding-bottom: 100px;
+z-index: 30;
+pointer-events: none;
+}
+.showroom-controls {
+display: flex;
+align-items: center;
+gap: 40px;
+pointer-events: auto;
+}
+.nav-btn {
+font-size: 48px;
+color: white;
+cursor: pointer;
+user-select: none;
+}
+.buy-btn {
+background: #ffda00;
+color: black;
+padding: 15px 40px;
+font-size: 24px;
+font-weight: bold;
+border-radius: 50px;
+cursor: pointer;
+border: none;
+}
+.buy-btn.locked { background: #555; color: #888; cursor: not-allowed; }
+
+#drift-msg {
+position: absolute;
+top: 40%;
+left: 50%;
+transform: translate(-50%, -50%);
+color: #ffda00;
+font-size: 48px;
+font-weight: 900;
+text-transform: uppercase;
+font-style: italic;
+opacity: 0;
+transition: opacity 0.2s;
+pointer-events: none;
+}
+#mobile-controls {
+position: absolute;
+bottom: 30px;
+width: 100%;
+display: none;
+justify-content: space-between;
+padding: 0 30px;
+box-sizing: border-box;
+pointer-events: none;
+}
+.touch-btn {
+width: 80px;
+height: 80px;
+background: rgba(255,255,255,0.2);
+border-radius: 50%;
+display: flex;
+align-items: center;
+justify-content: center;
+color: white;
+font-weight: bold;
+pointer-events: auto;
+user-select: none;
+}
+@media (max-width: 768px) { #mobile-controls { display: flex; } }
+</style>
+</head>
+<body>
+<div id="ui">
+<div class="stat-box">
+<div class="label">Coins</div>
+<div id="coins" class="value coins">0</div>
+</div>
+<div class="stat-box">
+<div class="label">Speed</div>
+<div id="speed" class="value">0</div>
+</div>
+</div>
+
+<div id="menu-buttons">
+<div class="btn btn-fullscreen" onclick="openInNewTab()">FULLSCREEN</div>
+<div class="btn" id="map-btn" onclick="toggleMapMenu()">CITY</div>
+<div class="btn" onclick="openShowroom()">CARS</div>
+</div>
+
+<div id="room-info">Lobby: <span id="room-id">...</span> | Players: <span id="player-count">1</span></div>
+
+<div id="showroom-ui">
+<h1 id="car-name" style="color:white; margin-bottom: 10px;">SUPERCAR</h1>
+<div class="showroom-controls">
+<div class="nav-btn" onclick="navCar(-1)">◀</div>
+<button id="action-btn" class="buy-btn" onclick="handleCarAction()">SELECT</button>
+<div class="nav-btn" onclick="navCar(1)">▶</div>
+</div>
+<div class="btn" style="margin-top: 20px;" onclick="closeShowroom()">BACK TO RACE</div>
+</div>
+
+<div id="drift-msg">DRIFTING!</div>
+
+<div id="mobile-controls">
+<div style="display:flex; gap: 10px;">
+<div class="touch-btn" id="btn-left">L</div>
+<div class="touch-btn" id="btn-right">R</div>
+</div>
+<div style="display:flex; gap: 10px;">
+<div class="touch-btn" id="btn-gas">GAS</div>
+<div class="touch-btn" id="btn-brake">B</div>
+</div>
+</div>
+
+<script>
+// --- TAB LOGIC ---
+function openInNewTab() {
+// Open current URL in new tab
+window.open(window.location.href, '_blank');
+}
+
+// --- MULTIPLAYER SETUP ---
+const myId = Math.random().toString(36).substr(2, 9);
+const urlParams = new URLSearchParams(window.location.search);
+const roomId = urlParams.get('room') || 'drift-global-1';
+document.getElementById('room-id').innerText = roomId;
+
+const socket = new WebSocket(`wss://free.piesocket.com/v3/${roomId}?api_key=VCXCEuvhuc6mveSSTfrliLCuFzSca5STAnpZy7uL&notify_self=0`);
+const remotePlayers = {};
+
+socket.onmessage = (e) => {
+const data = JSON.parse(e.data);
+if (data.type === 'update' && data.id !== myId) {
+updateRemotePlayer(data);
+}
+};
+
+function updateRemotePlayer(data) {
+if (!remotePlayers[data.id]) {
+const mesh = createCarMesh(carData[data.carIdx], true);
+scene.add(mesh);
+remotePlayers[data.id] = { mesh, lastUpdate: Date.now(), carIdx: data.carIdx };
+}
+
+const p = remotePlayers[data.id];
+if(p.carIdx !== data.carIdx) {
+scene.remove(p.mesh);
+p.mesh = createCarMesh(carData[data.carIdx], true);
+scene.add(p.mesh);
+p.carIdx = data.carIdx;
+}
+
+p.mesh.position.set(data.x, data.y, data.z);
+p.mesh.rotation.y = data.ry;
+p.lastUpdate = Date.now();
+}
+
+setInterval(() => {
+const now = Date.now();
+for (let id in remotePlayers) {
+if (now - remotePlayers[id].lastUpdate > 3000) {
+scene.remove(remotePlayers[id].mesh);
+delete remotePlayers[id];
+}
+}
+document.getElementById('player-count').innerText = Object.keys(remotePlayers).length + 1;
+}, 2000);
+
+// --- GAME LOGIC ---
+const state = {
+coins: 0,
+driftPoints: 0,
+isDrifting: false,
+inShowroom: false,
+selectedCarIndex: 0,
+previewCarIndex: 0,
+ownedCars: [0],
+keys: { w: false, a: false, s: false, d: false, space: false },
+touch: { left: false, right: false, gas: false, brake: false },
+currentMap: 'city'
+};
+
+const carData = [
+{ name: "DRIFT KING", color: 0xff3300, price: 0, scale: 1, accel: 0.025, maxSpeed: 1.5, handling: 0.065 },
+{ name: "MUSCLE BEAST", color: 0x3366ff, price: 500, scale: 1.1, accel: 0.035, maxSpeed: 1.8, handling: 0.055 },
+{ name: "HYPER BOLT", color: 0x00ff88, price: 2000, scale: 0.9, accel: 0.05, maxSpeed: 2.5, handling: 0.085 }
+];
+
+const maps = {
+city: { bg: 0x87ceeb, ground: 0x333333, fog: 0x87ceeb, obstacles: 0x555555, ramp: 0xffff00 },
+desert: { bg: 0xffcc88, ground: 0xd2b48c, fog: 0xffcc88, obstacles: 0xbc8f8f, ramp: 0x8b4513 },
+night: { bg: 0x050510, ground: 0x111111, fog: 0x000000, obstacles: 0x222244, ramp: 0x00ffff }
+};
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambientLight);
+const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+sun.position.set(50, 100, 50);
+sun.castShadow = true;
+scene.add(sun);
+
+function createCarMesh(data, isGhost = false) {
+const group = new THREE.Group();
+const bodyMat = new THREE.MeshPhongMaterial({
+color: data.color,
+transparent: isGhost,
+opacity: isGhost ? 0.5 : 1
+});
+
+const body = new THREE.Mesh(new THREE.BoxGeometry(1.8 * data.scale, 0.6, 4 * data.scale), bodyMat);
+body.position.y = 0.6;
+body.castShadow = !isGhost;
+group.add(body);
+
+const cabin = new THREE.Mesh(
+new THREE.BoxGeometry(1.4 * data.scale, 0.5, 2 * data.scale),
+new THREE.MeshPhongMaterial({ color: 0x111111, transparent: isGhost, opacity: isGhost ? 0.3 : 1 })
+);
+cabin.position.set(0, 1.15, -0.2 * data.scale);
+group.add(cabin);
+
+const wheelGeom = new THREE.CylinderGeometry(0.4, 0.4, 0.4, 16);
+wheelGeom.rotateZ(Math.PI / 2);
+const wheelMat = new THREE.MeshPhongMaterial({ color: 0x111111, transparent: isGhost, opacity: isGhost ? 0.3 : 1 });
+
+group.wheelMeshes = [];
+const wheelPos = [{x:-0.9,z:1.2}, {x:0.9,z:1.2}, {x:-0.9,z:-1.2}, {x:0.9,z:-1.2}];
+wheelPos.forEach(p => {
+const w = new THREE.Mesh(wheelGeom, wheelMat);
+w.position.set(p.x * data.scale, 0.4, p.z * data.scale);
+group.add(w);
+group.wheelMeshes.push(w);
+});
+return group;
+}
+
+let carGroup = createCarMesh(carData[0]);
+scene.add(carGroup);
+
+let ground, obstacles = [], ramps = [];
+function initMap(mapId) {
+if (ground) scene.remove(ground);
+obstacles.forEach(o => scene.remove(o));
+ramps.forEach(r => scene.remove(r));
+obstacles = []; ramps = [];
+
+const config = maps[mapId];
+scene.background = new THREE.Color(config.bg);
+scene.fog = new THREE.Fog(config.fog, 50, 200);
+ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshPhongMaterial({ color: config.ground }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+for(let i=0; i < 30; i++) {
+const h = 5 + Math.random() * 20;
+const b = new THREE.Mesh(new THREE.BoxGeometry(5, h, 5), new THREE.MeshPhongMaterial({ color: config.obstacles }));
+const angle = Math.random() * Math.PI * 2;
+const dist = 60 + Math.random() * 250;
+b.position.set(Math.cos(angle) * dist, h/2, Math.sin(angle) * dist);
+scene.add(b);
+obstacles.push(b);
+}
+
+const rampGeom = new THREE.BoxGeometry(10, 3, 14);
+rampGeom.translate(0, 1.5, 0);
+for(let i=0; i < 15; i++) {
+const r = new THREE.Mesh(rampGeom, new THREE.MeshPhongMaterial({ color: config.ramp }));
+const angle = Math.random() * Math.PI * 2;
+const dist = 40 + Math.random() * 200;
+r.position.set(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+r.rotation.y = Math.random() * Math.PI * 2;
+scene.add(r);
+ramps.push(r);
+}
+}
+
+function openShowroom() {
+state.inShowroom = true;
+state.previewCarIndex = state.selectedCarIndex;
+document.getElementById('showroom-ui').style.display = 'flex';
+document.getElementById('ui').style.display = 'none';
+document.getElementById('menu-buttons').style.display = 'none';
+updateShowroomCar();
+}
+
+function closeShowroom() {
+state.inShowroom = false;
+document.getElementById('showroom-ui').style.display = 'none';
+document.getElementById('ui').style.display = 'block';
+document.getElementById('menu-buttons').style.display = 'flex';
+if (showroomCar) scene.remove(showroomCar);
+scene.remove(carGroup);
+carGroup = createCarMesh(carData[state.selectedCarIndex]);
+scene.add(carGroup);
+}
+
+let showroomCar;
+function updateShowroomCar() {
+if (showroomCar) scene.remove(showroomCar);
+showroomCar = createCarMesh(carData[state.previewCarIndex]);
+showroomCar.position.set(carGroup.position.x, 0, carGroup.position.z);
+scene.add(showroomCar);
+document.getElementById('car-name').innerText = carData[state.previewCarIndex].name;
+const btn = document.getElementById('action-btn');
+if (state.ownedCars.includes(state.previewCarIndex)) {
+btn.innerText = "SELECT"; btn.className = "buy-btn";
+} else {
+btn.innerText = `BUY: $${carData[state.previewCarIndex].price}`;
+btn.className = state.coins >= carData[state.previewCarIndex].price ? "buy-btn" : "buy-btn locked";
+}
+}
+
+function navCar(dir) {
+state.previewCarIndex = (state.previewCarIndex + dir + carData.length) % carData.length;
+updateShowroomCar();
+}
+
+function handleCarAction() {
+if (state.ownedCars.includes(state.previewCarIndex)) {
+state.selectedCarIndex = state.previewCarIndex;
+closeShowroom();
+} else if (state.coins >= carData[state.previewCarIndex].price) {
+state.coins -= carData[state.previewCarIndex].price;
+state.ownedCars.push(state.previewCarIndex);
+state.selectedCarIndex = state.previewCarIndex;
+updateShowroomCar();
+document.getElementById('coins').innerText = state.coins;
+}
+}
+
+function toggleMapMenu() {
+const order = ['city', 'desert', 'night'];
+state.currentMap = order[(order.indexOf(state.currentMap) + 1) % order.length];
+document.getElementById('map-btn').innerText = state.currentMap.toUpperCase();
+initMap(state.currentMap);
+}
+
+let carVelocity = 0, carRotation = 0, driftAngle = 0, carYVelocity = 0;
+const friction = 0.99, gravity = 0.018;
+
+function updatePhysics() {
+if (state.inShowroom) { if(showroomCar) showroomCar.rotation.y += 0.02; return; }
+
+const currentCar = carData[state.selectedCarIndex];
+if (state.keys.w || state.touch.gas) carVelocity += currentCar.accel;
+else if (state.keys.s || state.touch.brake) carVelocity -= currentCar.accel * 1.5;
+
+carVelocity = Math.max(-currentCar.maxSpeed * 0.5, Math.min(carVelocity, currentCar.maxSpeed)) * friction;
+
+let steer = 0;
+if (state.keys.a || state.touch.left) steer = currentCar.handling;
+if (state.keys.d || state.touch.right) steer = -currentCar.handling;
+
+const isHandbraking = state.keys.space;
+driftAngle += (steer * Math.abs(carVelocity) * 12 * (isHandbraking ? 3 : 1.2) - driftAngle) * 0.15;
+carRotation += steer * (Math.abs(carVelocity) + 0.2) * 0.6;
+
+carYVelocity -= gravity;
+carGroup.position.y = Math.max(0, carGroup.position.y + carYVelocity);
+if(carGroup.position.y === 0) carYVelocity = 0;
+
+const moveAngle = carRotation + (driftAngle * 0.45);
+carGroup.position.x += Math.sin(moveAngle) * carVelocity;
+carGroup.position.z += Math.cos(moveAngle) * carVelocity;
+carGroup.rotation.y = carRotation + driftAngle;
+
+if (socket.readyState === WebSocket.OPEN) {
+socket.send(JSON.stringify({
+type: 'update', id: myId, carIdx: state.selectedCarIndex,
+x: carGroup.position.x, y: carGroup.position.y, z: carGroup.position.z,
+ry: carGroup.rotation.y
+}));
+}
+
+const driftIntensity = Math.abs(driftAngle) * Math.abs(carVelocity);
+if (driftIntensity > 0.05) {
+state.isDrifting = true;
+state.driftPoints += driftIntensity * 2.5;
+document.getElementById('drift-msg').style.opacity = 1;
+} else {
+if (state.isDrifting) {
+state.coins += Math.floor(state.driftPoints);
+document.getElementById('coins').innerText = state.coins;
+state.driftPoints = 0;
+}
+state.isDrifting = false;
+document.getElementById('drift-msg').style.opacity = 0;
+}
+document.getElementById('speed').innerText = Math.abs(Math.round(carVelocity * 100));
+}
+
+function animate() {
+requestAnimationFrame(animate);
+updatePhysics();
+const target = state.inShowroom ? showroomCar : carGroup;
+if(!target) return;
+const camOffset = state.inShowroom ?
+new THREE.Vector3(0, 3, 8) :
+new THREE.Vector3(-Math.sin(carRotation) * 11, 5, -Math.cos(carRotation) * 11);
+camera.position.lerp(target.position.clone().add(camOffset), 0.12);
+camera.lookAt(target.position);
+renderer.render(scene, camera);
+}
+
+window.addEventListener('keydown', e => {
+const k = e.key.toLowerCase();
+if(k==='w'||e.key==='ArrowUp') state.keys.w=true;
+if(k==='s'||e.key==='ArrowDown') state.keys.s=true;
+if(k==='a'||e.key==='ArrowLeft') state.keys.a=true;
+if(k==='d'||e.key==='ArrowRight') state.keys.d=true;
+if(e.key===' ') state.keys.space=true;
+});
+window.addEventListener('keyup', e => {
+const k = e.key.toLowerCase();
+if(k==='w'||e.key==='ArrowUp') state.keys.w=false;
+if(k==='s'||e.key==='ArrowDown') state.keys.s=false;
+if(k==='a'||e.key==='ArrowLeft') state.keys.a=false;
+if(k==='d'||e.key==='ArrowRight') state.keys.d=false;
+if(e.key===' ') state.keys.space=false;
+});
+
+const touchInit = (id, key) => {
+const el = document.getElementById(id);
+el.addEventListener('touchstart', (e) => { e.preventDefault(); state.touch[key] = true; });
+el.addEventListener('touchend', (e) => { e.preventDefault(); state.touch[key] = false; });
+};
+touchInit('btn-left', 'left'); touchInit('btn-right', 'right');
+touchInit('btn-gas', 'gas'); touchInit('btn-brake', 'brake');
+
+window.onload = () => { initMap('city'); animate(); };
+window.addEventListener('resize', () => {
+camera.aspect = window.innerWidth / window.innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
+
+
+
+
+
+
